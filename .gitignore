@@ -1,0 +1,5 @@
+.DS_Store
+logs
+docker-compose.yml
+.venv
+acme.json

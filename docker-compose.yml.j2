@@ -1,0 +1,135 @@
+version: '3'
+
+services:
+  traefik:
+    image: traefik:v2.1
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - web
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/traefik.yml:ro
+      - ./logs:/var/log/traefik
+      - ./acme.json:/acme.json
+      {%- if os == "linux" %}
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      {%- endif %}
+    labels:
+      - "traefik.enable=true"
+      
+      - "traefik.http.routers.traefik.entrypoints=http"
+      - "traefik.http.routers.traefik.rule=Host(`{{ url_traefik }}`) && (PathPrefix(`/traefik`) || PathPrefix(`/api`))"
+      
+      - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
+      - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
+      
+      - "traefik.http.routers.traefik.middlewares=traefik-https-redirect,traefik-stripprefix"
+      - "traefik.http.routers.traefik-secure.entrypoints=https"
+      - "traefik.http.routers.traefik-secure.rule=Host(`{{ url_traefik }}`) && (PathPrefix(`/traefik`) || PathPrefix(`/api`))"
+      
+      - "traefik.http.middlewares.tls-rep.redirectregex.permanent=true"
+      - "traefik.http.middlewares.tls-header.headers.SSLRedirect=true"
+      - "traefik.http.middlewares.tls-header.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.tls-header.headers.STSSeconds=315360000"
+      - "traefik.http.middlewares.tls-header.headers.STSIncludeSubdomains=true"
+      - "traefik.http.middlewares.tls-header.headers.STSPreload=true"
+      - "traefik.http.middlewares.tls-header.headers.browserXSSFilter=true"
+      - "traefik.http.middlewares.tls-header.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.tls-header.headers.frameDeny=true"
+      - "traefik.http.middlewares.tls-header.headers.customFrameOptionsValue=SAMEORIGIN"
+      - "traefik.http.middlewares.tls-header.headers.featurePolicy=accelerometer 'none'; ambient-light-sensor 'none'; camera 'none'; geolocation 'none'; gyroscope 'none'; magnetometer 'none'; microphone 'none'; usb 'none'; midi 'none'; sync-xhr 'none'; vr 'none'"
+      - "traefik.http.middlewares.tls-header.headers.referrerPolicy=strict-origin-when-cross-origin"
+
+      - "traefik.http.middlewares.tls-chain.chain.middlewares=tls-rep,tls-header"
+
+      - "traefik.http.routers.traefik-secure.middlewares=traefik-stripprefix,tls-chain"
+      - "traefik.http.routers.traefik-secure.tls=true"
+      - "traefik.http.routers.traefik-secure.tls.certresolver=http"
+      - "traefik.http.routers.traefik-secure.service=api@internal"
+
+  prometheus:
+    image: prom/prometheus:v2.15.2
+    restart: unless-stopped
+    container_name: prometheus
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus:/prometheus
+      {%- if os == "linux" %}
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      {%- endif %}
+    command:
+      - "--web.route-prefix=/"
+      - "--web.external-url=https://{{ url_traefik }}/prometheus"
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.entrypoints=http"
+      - "traefik.http.routers.prometheus.rule=Host(`{{ url_traefik }}`) && PathPrefix(`/prometheus`)"
+      - "traefik.http.middlewares.prometheus-stripprefix.stripprefix.prefixes=/prometheus"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.prometheus.middlewares=https-redirect,prometheus-stripprefix"
+      - "traefik.http.routers.prometheus-secure.entrypoints=https"
+      - "traefik.http.routers.prometheus-secure.rule=Host(`{{ url_traefik }}`) && PathPrefix(`/prometheus`)"
+      - "traefik.http.routers.prometheus-secure.middlewares=tls-chain,prometheus-stripprefix"
+      - "traefik.http.routers.prometheus-secure.tls=true"
+      - "traefik.http.routers.prometheus-secure.tls.certresolver=http"
+      - "traefik.http.routers.prometheus-secure.service=prometheus"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.docker.network=web"
+
+  grafana:
+    image: grafana/grafana:6.6.1
+    restart: unless-stopped
+    container_name: grafana
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      {%- if os == "linux" %}
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      {%- endif %}
+    env_file:
+      - grafana.env
+    depends_on:
+      - prometheus
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.entrypoints=http"
+      - "traefik.http.routers.grafana.rule=Host(`{{ url_traefik }}`) && PathPrefix(`/grafana`)"
+      - "traefik.http.middlewares.grafana-stripprefix.stripprefix.prefixes=/grafana"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.grafana.middlewares=https-redirect,grafana-stripprefix"
+      - "traefik.http.routers.grafana-secure.entrypoints=https"
+      - "traefik.http.routers.grafana-secure.rule=Host(`{{ url_traefik }}`) && PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana-secure.middlewares=tls-chain,grafana-stripprefix"
+      - "traefik.http.routers.grafana-secure.tls=true"
+      - "traefik.http.routers.grafana-secure.tls.certresolver=http"
+      - "traefik.http.routers.grafana-secure.service=grafana"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.docker.network=web"
+
+networks:
+  internal:
+  web:
+    external: true
+
+volumes:
+  prometheus:
+  grafana:

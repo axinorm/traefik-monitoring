@@ -1,0 +1,40 @@
+api:
+  dashboard: true
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  format: json
+
+entryPoints:
+  http:
+    address: ":80"
+  https:
+    address: ":443"
+  metrics:
+    address: ":8080"
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+
+certificatesResolvers:
+  http:
+    acme:
+      email: myemail@mondomaine.com
+      storage: acme.json
+      # Dev
+      caServer: "https://acme-staging.api.letsencrypt.org/directory"
+      httpChallenge:
+        entryPoint: http
