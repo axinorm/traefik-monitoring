@@ -15,7 +15,7 @@ Set environment variables
 ```sh
 export TM_SERV_OS=linux
 export TM_SERV_ARCH=arm
-export TM_URL_TRAEFIK=admin.example.com
+export TM_URL_TRAEFIK=example.com
 ```
 
 Generate file
